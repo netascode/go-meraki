@@ -38,7 +38,7 @@ My First Organization
 `meraki.Result` uses GJSON to simplify handling JSON results. See the [GJSON](https://github.com/tidwall/gjson) documentation for more detail.
 
 ```go
-res, _ := client.Get("/organziations")
+res, _ := client.Get("/organizations")
 
 for _, obj := range res.Array() {
     println(obj.Get("@pretty").String()) // pretty print network objects

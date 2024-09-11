@@ -3,6 +3,7 @@ package meraki
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -151,6 +152,40 @@ func (client Client) NewReq(method, uri string, body io.Reader, mods ...func(*Re
 	return req
 }
 
+func logJson(body []byte) error {
+	if len(body) == 0 {
+		return nil
+	}
+	var err error
+	var pretty []byte
+	if body[0] == '{' {
+		m := make(map[string]interface{})
+		err = json.Unmarshal(body, &m)
+		if err != nil {
+			return err
+		}
+		pretty, err = json.MarshalIndent(m, "", "  ")
+		if err != nil {
+			return err
+		}
+	}
+	if body[0] == '[' {
+		a := make([]interface{}, 0)
+		err = json.Unmarshal(body, &a)
+		if err != nil {
+			return err
+		}
+		pretty, err = json.MarshalIndent(a, "", "  ")
+		if err != nil {
+			return err
+		}
+	}
+	for _, l := range strings.Split(string(pretty), "\n") {
+		log.Println(l)
+	}
+	return nil
+}
+
 // Do makes a request.
 // Requests for Do are built ouside of the client, e.g.
 //
@@ -175,7 +210,22 @@ func (client *Client) Do(req Req) (Res, error) {
 
 		req.HttpReq.Body = io.NopCloser(bytes.NewBuffer(body))
 		if req.LogPayload {
-			log.Printf("[DEBUG] HTTP Request: %s, %s, %s", req.HttpReq.Method, req.HttpReq.URL, string(body))
+			log.Println("REQUEST --------------------------")
+			log.Printf("%s %s\n", req.HttpReq.Method, req.HttpReq.URL)
+			for k, v := range req.HttpReq.Header {
+				if k != "Authorization" {
+					log.Printf("%s: %s\n", k, v)
+				} else {
+					log.Println("Authorization: ****")
+				}
+			}
+			log.Println("--------------------------")
+
+			err := logJson(body)
+			if err != nil {
+				log.Printf("failed to log json request: %s\n", err.Error())
+			}
+
 		} else {
 			log.Printf("[DEBUG] HTTP Request: %s, %s", req.HttpReq.Method, req.HttpReq.URL)
 		}
@@ -206,7 +256,12 @@ func (client *Client) Do(req Req) (Res, error) {
 		}
 		res = Res(gjson.ParseBytes(bodyBytes))
 		if req.LogPayload {
-			log.Printf("[DEBUG] HTTP Response: %s", res.Raw)
+			log.Printf("RESPONSE %d --------------------------\n", httpRes.StatusCode)
+			err := logJson([]byte(res.Raw))
+			log.Println("--------------------------")
+			if err != nil {
+				log.Printf("failed to log json response: %s\n", err.Error())
+			}
 		}
 
 		if httpRes.StatusCode >= 200 && httpRes.StatusCode <= 299 {

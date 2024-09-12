@@ -297,7 +297,7 @@ func (client *Client) Do(req Req) (Res, error) {
 	}
 
 	// Return JSON error message if present
-	if res.Get("errors").Exists() {
+	if res.Get("errors").Exists() && len(res.Get("errors").Array()) > 0 {
 		log.Printf("[ERROR] JSON error: %s", res.Get("errors").String())
 		return res, fmt.Errorf("JSON error: %s", res.Get("errors").String())
 	}

@@ -291,7 +291,12 @@ func (client *Client) Do(req Req) (Res, error) {
 			} else {
 				log.Printf("[ERROR] HTTP Request failed: StatusCode %v", httpRes.StatusCode)
 				log.Printf("[DEBUG] Exit from Do method")
-				return res, fmt.Errorf("HTTP Request failed: StatusCode %v", httpRes.StatusCode)
+				if res.Get("errors").Exists() && len(res.Get("errors").Array()) > 0 {
+					log.Printf("[ERROR] JSON error: %s", res.Get("errors").String())
+					return res, fmt.Errorf("HTTP Request failed: StatusCode %v, JSON error: %s", httpRes.StatusCode, res.Get("errors").String())
+				} else {
+					return res, fmt.Errorf("HTTP Request failed: StatusCode %v", httpRes.StatusCode)
+				}
 			}
 		}
 	}

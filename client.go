@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tidwall/gjson"
@@ -50,8 +51,10 @@ type Client struct {
 	BackoffMaxDelay int
 	// Backoff delay factor
 	BackoffDelayFactor float64
-
+	// Rate limiter bucket
 	RateLimiterBucket *ratelimit.Bucket
+	// Mutex to synchronize write operations
+	mutex *sync.Mutex
 }
 
 // NewClient creates a new Meraki HTTP client.
@@ -75,6 +78,7 @@ func NewClient(token string, mods ...func(*Client)) (Client, error) {
 		BackoffMaxDelay:    DefaultBackoffMaxDelay,
 		BackoffDelayFactor: DefaultBackoffDelayFactor,
 		RateLimiterBucket:  ratelimit.NewBucketWithQuantum(time.Second, int64(10), int64(10)),
+		mutex:              &sync.Mutex{},
 	}
 
 	for _, mod := range mods {
@@ -208,6 +212,10 @@ func (client *Client) Do(req Req) (Res, error) {
 	for attempts := 0; ; attempts++ {
 		client.RateLimiterBucket.Wait(1) // Block until rate limit token available
 
+		if req.HttpReq.Method != "GET" {
+			client.mutex.Lock()
+		}
+
 		req.HttpReq.Body = io.NopCloser(bytes.NewBuffer(body))
 		if req.LogPayload {
 			log.Println("REQUEST --------------------------")
@@ -231,6 +239,9 @@ func (client *Client) Do(req Req) (Res, error) {
 		}
 
 		httpRes, err := client.HttpClient.Do(req.HttpReq)
+		if req.HttpReq.Method != "GET" {
+			client.mutex.Unlock()
+		}
 		if err != nil {
 			if ok := client.Backoff(attempts); !ok {
 				log.Printf("[ERROR] HTTP Connection error occured: %+v", err)

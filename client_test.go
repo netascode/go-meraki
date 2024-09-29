@@ -89,6 +89,30 @@ func TestClientGetPages(t *testing.T) {
 	assert.Equal(t, `["1","2","3","4","5","6","7","8"]`, res.Raw)
 }
 
+// TestClientGetPages is like TestClientGet, but with basic pagination and "items" response.
+func TestClientGetPagesItems(t *testing.T) {
+	defer gock.Off()
+	client := testClient()
+	var err error
+
+	gock.New(client.BaseUrl).Get("/url").
+		Reply(200).
+		BodyString(`{"items": ["1","2","3"]}`).
+		Header.Set("Link", `<`+client.BaseUrl+`/url?offset=4>; rel="next"`)
+	gock.New(client.BaseUrl).Get("/url").MatchParam("offset", "4").
+		Reply(200).
+		BodyString(`{"items": ["4","5","6"]}`).
+		Header.Set("Link", `<`+client.BaseUrl+`/url?offset=7>; rel="next"`)
+	gock.New(client.BaseUrl).Get("/url").MatchParam("offset", "7").
+		Reply(200).
+		BodyString(`{"items": ["7","8"]}`).
+		Header.Set("Link", `<`+client.BaseUrl+`/url?offset=1>; rel="first"`)
+
+	res, err := client.Get("/url")
+	assert.NoError(t, err)
+	assert.Equal(t, `{"items":["1","2","3","4","5","6","7","8"]}`, res.Raw)
+}
+
 // TestClientDelete tests the Client::Delete method.
 func TestClientDelete(t *testing.T) {
 	defer gock.Off()

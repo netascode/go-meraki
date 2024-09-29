@@ -325,6 +325,7 @@ func (client *Client) Do(req Req) (Res, error) {
 // Results will be the raw data structure as returned by Meraki API
 func (client *Client) Get(path string, mods ...func(*Req)) (Res, error) {
 	r := ""
+	hasItems := false
 	for {
 		response, err := client.get(path, mods...)
 		if err != nil {
@@ -335,8 +336,17 @@ func (client *Client) Get(path string, mods ...func(*Req)) (Res, error) {
 			return response, nil
 		}
 
+		if response.Get("items").Exists() {
+			hasItems = true
+			response = Res{Result: response.Get("items"), Header: response.Header}
+		}
+
 		for _, item := range response.Array() {
-			r, _ = sjson.SetRaw(r, "response.-1", item.Raw)
+			if hasItems {
+				r, _ = sjson.SetRaw(r, "response.items.-1", item.Raw)
+			} else {
+				r, _ = sjson.SetRaw(r, "response.-1", item.Raw)
+			}
 		}
 
 		links := strings.Split(response.Header.Get("Link"), ",")

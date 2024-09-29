@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 
 	"github.com/juju/ratelimit"
 )
@@ -265,7 +266,7 @@ func (client *Client) Do(req Req) (Res, error) {
 				continue
 			}
 		}
-		res = Res(gjson.ParseBytes(bodyBytes))
+		res = Res{Result: gjson.ParseBytes(bodyBytes), Header: httpRes.Header}
 		if req.LogPayload {
 			log.Printf("RESPONSE %d --------------------------\n", httpRes.StatusCode)
 			err := logJson([]byte(res.Raw))
@@ -320,9 +321,47 @@ func (client *Client) Do(req Req) (Res, error) {
 	return res, nil
 }
 
-// Get makes a GET request and returns a GJSON result.
+// Get makes a GET request and returns a GJSON result. It handles pagination transparently.
 // Results will be the raw data structure as returned by Meraki API
 func (client *Client) Get(path string, mods ...func(*Req)) (Res, error) {
+	r := ""
+	for {
+		response, err := client.get(path, mods...)
+		if err != nil {
+			return response, err
+		}
+
+		if response.Header.Get("Link") == "" {
+			return response, nil
+		}
+
+		for _, item := range response.Array() {
+			r, _ = sjson.SetRaw(r, "response.-1", item.Raw)
+		}
+
+		links := strings.Split(response.Header.Get("Link"), ",")
+		foundNext := false
+		for _, link := range links {
+			if strings.Contains(link, "rel=\"next\"") {
+				foundNext = true
+				path = strings.Trim(strings.Split(strings.Split(link, ";")[0], "<")[1], ">")
+				s := strings.Split(path, client.BaseUrl)
+				if len(s) > 1 {
+					path = s[1]
+				} else {
+					return response, fmt.Errorf("Invalid 'next' URL received in 'Link' header: %s", path)
+				}
+			}
+		}
+
+		if !foundNext {
+			return Res{Result: gjson.Parse(gjson.Get(r, "response").Raw)}, nil
+		}
+	}
+}
+
+// get is like Get but without pagination.
+func (client *Client) get(path string, mods ...func(*Req)) (Res, error) {
 	req := client.NewReq("GET", path, nil, mods...)
 	return client.Do(req)
 }

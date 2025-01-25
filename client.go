@@ -279,36 +279,39 @@ func (client *Client) Do(req Req) (Res, error) {
 		if httpRes.StatusCode >= 200 && httpRes.StatusCode <= 299 {
 			log.Printf("[DEBUG] Exit from Do method")
 			break
-		} else {
-			if ok := client.Backoff(attempts); !ok {
-				log.Printf("[ERROR] HTTP Request failed: StatusCode %v", httpRes.StatusCode)
-				log.Printf("[DEBUG] Exit from Do method")
-				return res, fmt.Errorf("HTTP Request failed: StatusCode %v", httpRes.StatusCode)
-			} else if httpRes.StatusCode == 429 {
-				retryAfter := httpRes.Header.Get("Retry-After")
-				retryAfterDuration := time.Duration(0)
-				if retryAfter == "0" {
-					retryAfterDuration = time.Second
-				} else if retryAfter != "" {
-					retryAfterDuration, _ = time.ParseDuration(retryAfter + "s")
-				} else {
-					retryAfterDuration = 15 * time.Second
-				}
-				log.Printf("[WARNING] HTTP Request rate limited, waiting %v seconds, Retries: %v", retryAfterDuration.Seconds(), attempts)
-				time.Sleep(retryAfterDuration)
-				continue
-			} else if httpRes.StatusCode >= 500 && httpRes.StatusCode <= 599 {
-				log.Printf("[ERROR] HTTP Request failed: StatusCode %v, Retries: %v", httpRes.StatusCode, attempts)
-				continue
+		}
+
+		if ok := client.Backoff(attempts); !ok {
+			log.Printf("[ERROR] HTTP Request failed: StatusCode %v", httpRes.StatusCode)
+			log.Printf("[DEBUG] Exit from Do method")
+			return res, fmt.Errorf("HTTP Request failed: StatusCode %v", httpRes.StatusCode)
+		} else if httpRes.StatusCode == 429 {
+			retryAfter := httpRes.Header.Get("Retry-After")
+			retryAfterDuration := time.Duration(0)
+			if retryAfter == "0" {
+				retryAfterDuration = time.Second
+			} else if retryAfter != "" {
+				retryAfterDuration, _ = time.ParseDuration(retryAfter + "s")
 			} else {
-				log.Printf("[ERROR] HTTP Request failed: StatusCode %v", httpRes.StatusCode)
-				log.Printf("[DEBUG] Exit from Do method")
-				if res.Get("errors").Exists() && len(res.Get("errors").Array()) > 0 {
-					log.Printf("[ERROR] JSON error: %s", res.Get("errors").String())
-					return res, fmt.Errorf("HTTP Request failed: StatusCode %v, JSON error: %s", httpRes.StatusCode, res.Get("errors").String())
-				} else {
-					return res, fmt.Errorf("HTTP Request failed: StatusCode %v", httpRes.StatusCode)
-				}
+				retryAfterDuration = 15 * time.Second
+			}
+			log.Printf("[WARNING] HTTP Request rate limited, waiting %v seconds, Retries: %v", retryAfterDuration.Seconds(), attempts)
+			time.Sleep(retryAfterDuration)
+			continue
+		} else if httpRes.StatusCode >= 500 && httpRes.StatusCode <= 599 {
+			log.Printf("[ERROR] HTTP Request failed: StatusCode %v, Retries: %v", httpRes.StatusCode, attempts)
+			continue
+		} else if httpRes.StatusCode == 404 && (httpRes.Request.Method == "POST" || httpRes.Request.Method == "PUT") {
+			log.Printf("[ERROR] HTTP Request failed: StatusCode %v, Retries: %v", httpRes.StatusCode, attempts)
+			continue
+		} else {
+			log.Printf("[ERROR] HTTP Request failed: StatusCode %v", httpRes.StatusCode)
+			log.Printf("[DEBUG] Exit from Do method")
+			if res.Get("errors").Exists() && len(res.Get("errors").Array()) > 0 {
+				log.Printf("[ERROR] JSON error: %s", res.Get("errors").String())
+				return res, fmt.Errorf("HTTP Request failed: StatusCode %v, JSON error: %s", httpRes.StatusCode, res.Get("errors").String())
+			} else {
+				return res, fmt.Errorf("HTTP Request failed: StatusCode %v", httpRes.StatusCode)
 			}
 		}
 	}

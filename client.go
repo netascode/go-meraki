@@ -298,10 +298,7 @@ func (client *Client) Do(req Req) (Res, error) {
 			log.Printf("[WARNING] HTTP Request rate limited, waiting %v seconds, Retries: %v", retryAfterDuration.Seconds(), attempts)
 			time.Sleep(retryAfterDuration)
 			continue
-		} else if httpRes.StatusCode >= 500 && httpRes.StatusCode <= 599 {
-			log.Printf("[ERROR] HTTP Request failed: StatusCode %v, Retries: %v", httpRes.StatusCode, attempts)
-			continue
-		} else if httpRes.StatusCode == 404 && (httpRes.Request.Method == "POST" || httpRes.Request.Method == "PUT") {
+		} else if (httpRes.StatusCode >= 500 && httpRes.StatusCode <= 599) || httpRes.StatusCode == 404 {
 			log.Printf("[ERROR] HTTP Request failed: StatusCode %v, Retries: %v", httpRes.StatusCode, attempts)
 			continue
 		} else {

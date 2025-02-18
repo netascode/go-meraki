@@ -11,6 +11,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/cookiejar"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -52,6 +53,8 @@ type Client struct {
 	BackoffMaxDelay int
 	// Backoff delay factor
 	BackoffDelayFactor float64
+	// Retry on additional HTTP error codes
+	RetryOnErrorCodes []int
 	// Rate limiter bucket
 	RateLimiterBucket *ratelimit.Bucket
 	// Mutex to synchronize write operations
@@ -78,6 +81,7 @@ func NewClient(token string, mods ...func(*Client)) (Client, error) {
 		BackoffMinDelay:    DefaultBackoffMinDelay,
 		BackoffMaxDelay:    DefaultBackoffMaxDelay,
 		BackoffDelayFactor: DefaultBackoffDelayFactor,
+		RetryOnErrorCodes:  []int{},
 		RateLimiterBucket:  ratelimit.NewBucketWithQuantum(time.Second, int64(10), int64(10)),
 		mutex:              &sync.Mutex{},
 	}
@@ -141,6 +145,13 @@ func BackoffMaxDelay(x int) func(*Client) {
 func BackoffDelayFactor(x float64) func(*Client) {
 	return func(client *Client) {
 		client.BackoffDelayFactor = x
+	}
+}
+
+// RetryOnErrorCodes allows configuring the client to retry on additional HTTP error codes.
+func RetryOnErrorCodes(x []int) func(*Client) {
+	return func(client *Client) {
+		client.RetryOnErrorCodes = x
 	}
 }
 
@@ -298,7 +309,10 @@ func (client *Client) Do(req Req) (Res, error) {
 			log.Printf("[WARNING] HTTP Request rate limited, waiting %v seconds, Retries: %v", retryAfterDuration.Seconds(), attempts)
 			time.Sleep(retryAfterDuration)
 			continue
-		} else if (httpRes.StatusCode >= 500 && httpRes.StatusCode <= 599) || httpRes.StatusCode == 404 {
+		} else if httpRes.StatusCode >= 500 && httpRes.StatusCode <= 599 {
+			log.Printf("[ERROR] HTTP Request failed: StatusCode %v, Retries: %v", httpRes.StatusCode, attempts)
+			continue
+		} else if slices.Contains(client.RetryOnErrorCodes, httpRes.StatusCode) {
 			log.Printf("[ERROR] HTTP Request failed: StatusCode %v, Retries: %v", httpRes.StatusCode, attempts)
 			continue
 		} else {

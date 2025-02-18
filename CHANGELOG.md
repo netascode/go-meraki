@@ -1,4 +1,4 @@
-## 0.1.1 (unreleased)
+## 0.1.1
 
 - Add configurable list of HTTP error codes to retry on
 

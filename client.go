@@ -366,7 +366,7 @@ func (client *Client) Get(path string, mods ...func(*Req)) (Res, error) {
 		links := strings.Split(response.Header.Get("Link"), ",")
 		foundNext := false
 		for _, link := range links {
-			if strings.Contains(link, "rel=\"next\"") {
+			if strings.Contains(link, "rel=\"next\"") || strings.Contains(link, "rel=next") {
 				foundNext = true
 				path = strings.Trim(strings.Split(strings.Split(link, ";")[0], "<")[1], ">")
 				s := strings.Split(path, client.BaseUrl)

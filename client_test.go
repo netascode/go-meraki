@@ -102,7 +102,7 @@ func TestClientGetPagesItems(t *testing.T) {
 	gock.New(client.BaseUrl).Get("/url").MatchParam("offset", "4").
 		Reply(200).
 		BodyString(`{"items": ["4","5","6"]}`).
-		Header.Set("Link", `<`+client.BaseUrl+`/url?offset=7>; rel="next"`)
+		Header.Set("Link", `<`+client.BaseUrl+`/url?offset=7>; rel=next`)
 	gock.New(client.BaseUrl).Get("/url").MatchParam("offset", "7").
 		Reply(200).
 		BodyString(`{"items": ["7","8"]}`).

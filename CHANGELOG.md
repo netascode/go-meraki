@@ -1,4 +1,4 @@
-## 0.1.2 (unreleased)
+## 0.1.2
 
 - Accept relation values without quotes in the "Link" header of paginated responses
 

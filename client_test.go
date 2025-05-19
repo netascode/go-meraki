@@ -200,3 +200,48 @@ func TestClientPut(t *testing.T) {
 	_, err = client.Put("/url", "{}")
 	assert.Error(t, err)
 }
+
+// TestClientBatch tests the Client::Batch method.
+func TestClientBatch(t *testing.T) {
+	defer gock.Off()
+	client := testClient()
+
+	var err error
+
+	// Synchronous Success
+	gock.New(client.BaseUrl).
+		Post("/organizations/1/actionBatches").
+		Reply(201).
+		BodyString(`{"id": "1", "status": {"completed": true, "failed": false, "errors": []}}`)
+	actions := []ActionModel{NewAction("update", "url", "{}")}
+	_, err = client.Batch("1", actions)
+	assert.NoError(t, err)
+
+	// Asynchronous Success
+	gock.New(client.BaseUrl).
+		Post("/organizations/1/actionBatches").
+		Reply(201).
+		BodyString(`{"id": "1", "status": {"completed": false, "failed": false, "errors": []}}`)
+	gock.New(client.BaseUrl).
+		Get("/organizations/1/actionBatches/1").
+		Reply(200).
+		BodyString(`{"id": "1", "status": {"completed": false, "failed": false, "errors": []}}`)
+	gock.New(client.BaseUrl).
+		Get("/organizations/1/actionBatches/1").
+		Reply(200).
+		BodyString(`{"id": "1", "status": {"completed": true, "failed": false, "errors": []}}`)
+	for range 20 {
+		actions = append(actions, NewAction("update", "url", "{}"))
+	}
+	_, err = client.Batch("1", actions)
+	assert.NoError(t, err)
+
+	// Error
+	gock.New(client.BaseUrl).
+		Post("/organizations/1/actionBatches").
+		Reply(201).
+		BodyString(`{"id": "1", "status": {"completed": false, "failed": true, "errors": ["Unsupported operation"]}}`)
+	actions = []ActionModel{NewAction("update", "url", "{}")}
+	_, err = client.Batch("1", actions)
+	assert.Error(t, err)
+}

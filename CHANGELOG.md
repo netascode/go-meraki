@@ -1,3 +1,7 @@
+## 0.2.0 (unreleased)
+
+- Add support for action batches (bulk) requests
+
 ## 0.1.2
 
 - Accept relation values without quotes in the "Link" header of paginated responses

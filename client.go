@@ -22,10 +22,13 @@ import (
 	"github.com/juju/ratelimit"
 )
 
-const DefaultMaxRetries int = 3
-const DefaultBackoffMinDelay int = 2
-const DefaultBackoffMaxDelay int = 60
-const DefaultBackoffDelayFactor float64 = 3
+const (
+	DefaultMaxRetries         int           = 3
+	DefaultBackoffMinDelay    int           = 2
+	DefaultBackoffMaxDelay    int           = 60
+	DefaultBackoffDelayFactor float64       = 3
+	BatchPollingInterval      time.Duration = 200 * time.Millisecond
+)
 
 // Client is an HTTP Meraki client.
 // Use meraki.NewClient to initiate a client.
@@ -408,6 +411,58 @@ func (client *Client) Post(path, data string, mods ...func(*Req)) (Res, error) {
 func (client *Client) Put(path, data string, mods ...func(*Req)) (Res, error) {
 	req := client.NewReq("PUT", path, strings.NewReader(data), mods...)
 	return client.Do(req)
+}
+
+// Batch makes an action batch (bulk) request
+func (client *Client) Batch(organizationId string, actions []ActionModel, mods ...func(*Req)) (Res, error) {
+	synchronous := false
+	if len(actions) <= 20 {
+		synchronous = true
+	}
+
+	body, _ := sjson.Set("", "confirmed", true)
+	body, _ = sjson.Set(body, "synchronous", synchronous)
+	for _, action := range actions {
+		actionBody, _ := sjson.Set("", "operation", action.Operation)
+		actionBody, _ = sjson.Set(actionBody, "resource", action.Resource)
+		actionBody, _ = sjson.Set(actionBody, "body", action.Body)
+		body, _ = sjson.SetRaw(body, "actions.-1", actionBody)
+	}
+
+	url := fmt.Sprintf("/organizations/%s/actionBatches", organizationId)
+	req := client.NewReq("POST", url, strings.NewReader(body), mods...)
+	res, err := client.Do(req)
+	if err != nil {
+		return res, err
+	}
+	completed := res.Get("status.completed").Bool()
+	failed := res.Get("status.failed").Bool()
+	if failed {
+		return res, fmt.Errorf("Batch request failed: %s", res.Get("status.errors").String())
+	}
+	if completed {
+		return res, nil
+	}
+
+	id := res.Get("id").String()
+
+	// If the batch is not completed, we need to wait for it to complete
+	for {
+		req := client.NewReq("GET", fmt.Sprintf("/organizations/%s/actionBatches/%s", organizationId, id), nil)
+		res, err := client.Do(req)
+		if err != nil {
+			return res, err
+		}
+		completed = res.Get("status.completed").Bool()
+		failed = res.Get("status.failed").Bool()
+		if failed {
+			return res, fmt.Errorf("Batch request failed: %s", res.Get("status.errors").String())
+		}
+		if completed {
+			return res, nil
+		}
+		time.Sleep(BatchPollingInterval)
+	}
 }
 
 // Backoff waits following an exponential backoff algorithm

@@ -56,3 +56,15 @@ type Req struct {
 func NoLogPayload(req *Req) {
 	req.LogPayload = false
 }
+
+// ActionModel is a struct for batch actions.
+type ActionModel struct {
+	Operation string
+	Resource  string
+	Body      string
+}
+
+// Create new Action for Batch()
+func NewAction(operation, resource, body string) ActionModel {
+	return ActionModel{Operation: operation, Resource: resource, Body: body}
+}

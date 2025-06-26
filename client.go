@@ -425,7 +425,7 @@ func (client *Client) Batch(organizationId string, actions []ActionModel, mods .
 	for _, action := range actions {
 		actionBody, _ := sjson.Set("", "operation", action.Operation)
 		actionBody, _ = sjson.Set(actionBody, "resource", action.Resource)
-		actionBody, _ = sjson.Set(actionBody, "body", action.Body)
+		actionBody, _ = sjson.SetRaw(actionBody, "body", action.Body)
 		body, _ = sjson.SetRaw(body, "actions.-1", actionBody)
 	}
 

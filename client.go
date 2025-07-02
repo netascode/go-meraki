@@ -23,11 +23,13 @@ import (
 )
 
 const (
-	DefaultMaxRetries         int           = 3
-	DefaultBackoffMinDelay    int           = 2
-	DefaultBackoffMaxDelay    int           = 60
-	DefaultBackoffDelayFactor float64       = 3
-	BatchPollingInterval      time.Duration = 200 * time.Millisecond
+	DefaultMaxRetries            int           = 3
+	DefaultBackoffMinDelay       int           = 2
+	DefaultBackoffMaxDelay       int           = 60
+	DefaultBackoffDelayFactor    float64       = 3
+	MaxAPICallsPerSecond         int64         = 10
+	BatchPollingInterval         time.Duration = 200 * time.Millisecond
+	MaxConcurrentBatchOperations int           = 5
 )
 
 // Client is an HTTP Meraki client.
@@ -62,6 +64,8 @@ type Client struct {
 	RateLimiterBucket *ratelimit.Bucket
 	// Mutex to synchronize write operations
 	mutex *sync.Mutex
+	// Channel to limit concurrent batch operations
+	batchOperationsChannel chan struct{}
 }
 
 // NewClient creates a new Meraki HTTP client.
@@ -76,17 +80,18 @@ func NewClient(token string, mods ...func(*Client)) (Client, error) {
 	}
 
 	client := Client{
-		HttpClient:         &httpClient,
-		BaseUrl:            "https://api.meraki.com/api/v1",
-		ApiToken:           token,
-		UserAgent:          "go-meraki netascode",
-		MaxRetries:         DefaultMaxRetries,
-		BackoffMinDelay:    DefaultBackoffMinDelay,
-		BackoffMaxDelay:    DefaultBackoffMaxDelay,
-		BackoffDelayFactor: DefaultBackoffDelayFactor,
-		RetryOnErrorCodes:  []int{},
-		RateLimiterBucket:  ratelimit.NewBucketWithQuantum(time.Second, int64(10), int64(10)),
-		mutex:              &sync.Mutex{},
+		HttpClient:             &httpClient,
+		BaseUrl:                "https://api.meraki.com/api/v1",
+		ApiToken:               token,
+		UserAgent:              "go-meraki netascode",
+		MaxRetries:             DefaultMaxRetries,
+		BackoffMinDelay:        DefaultBackoffMinDelay,
+		BackoffMaxDelay:        DefaultBackoffMaxDelay,
+		BackoffDelayFactor:     DefaultBackoffDelayFactor,
+		RetryOnErrorCodes:      []int{},
+		RateLimiterBucket:      ratelimit.NewBucketWithQuantum(time.Second, MaxAPICallsPerSecond, MaxAPICallsPerSecond),
+		mutex:                  &sync.Mutex{},
+		batchOperationsChannel: make(chan struct{}, MaxConcurrentBatchOperations),
 	}
 
 	for _, mod := range mods {
@@ -430,6 +435,12 @@ func (client *Client) Batch(organizationId string, actions []ActionModel, mods .
 	}
 
 	url := fmt.Sprintf("/organizations/%s/actionBatches", organizationId)
+
+	client.batchOperationsChannel <- struct{}{}
+	defer func() {
+		<-client.batchOperationsChannel
+	}()
+
 	req := client.NewReq("POST", url, strings.NewReader(body), mods...)
 	res, err := client.Do(req)
 	if err != nil {

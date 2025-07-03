@@ -420,26 +420,76 @@ func (client *Client) Put(path, data string, mods ...func(*Req)) (Res, error) {
 
 // Batch makes an action batch (bulk) request
 func (client *Client) Batch(organizationId string, actions []ActionModel, mods ...func(*Req)) (Res, error) {
-	synchronous := false
-	if len(actions) <= 20 {
-		synchronous = true
+	if len(actions) <= 100 {
+		return client.submitBatch(organizationId, actions, mods...)
 	}
 
+	// If more than 100 actions, split into multiple batches
+	var allResults []gjson.Result
+	var allErrors []error
+	var allHeaders []http.Header
+	for i := 0; i < len(actions); i += 100 {
+		end := i + 100
+		if end > len(actions) {
+			end = len(actions)
+		}
+		batchActions := actions[i:end]
+
+		res, err := client.submitBatch(organizationId, batchActions, mods...)
+		if err != nil {
+			allErrors = append(allErrors, err)
+			// Encode the error as a JSON object for the result array
+			errorObj := fmt.Sprintf(`{"error": "%s"}`, strings.ReplaceAll(err.Error(), "\"", "'"))
+			allResults = append(allResults, gjson.Parse(errorObj))
+			allHeaders = append(allHeaders, res.Header)
+			continue
+		}
+		allResults = append(allResults, res.Result)
+		allHeaders = append(allHeaders, res.Header)
+	}
+
+	// Combine all results into a single Res
+	resultsArray := make([]string, 0, len(allResults))
+	createdResourcesArray := make([]string, 0)
+	for _, r := range allResults {
+		resultsArray = append(resultsArray, r.Raw)
+		r.Get("status.createdResources").ForEach(func(k, v gjson.Result) bool {
+			createdResourcesArray = append(createdResourcesArray, v.Raw)
+			return true
+		})
+	}
+	combinedRaw := fmt.Sprintf("[%s]", strings.Join(resultsArray, ","))
+	combinedResult, _ := sjson.SetRaw("", "responses", combinedRaw)
+	combinedResult, _ = sjson.SetRaw(combinedResult, "status.createdResources", fmt.Sprintf("[%s]", strings.Join(createdResourcesArray, ",")))
+	// Use the header from the last batch (or empty if none)
+	var lastHeader http.Header
+	if len(allHeaders) > 0 {
+		lastHeader = allHeaders[len(allHeaders)-1]
+	} else {
+		lastHeader = http.Header{}
+	}
+	if len(allErrors) > 0 {
+		e := fmt.Errorf("Batch request failed: %v", allErrors)
+		return Res{Result: gjson.Parse(combinedResult), Header: lastHeader}, e
+	}
+	return Res{Result: gjson.Parse(combinedResult), Header: lastHeader}, nil
+}
+
+// submitBatch submits a batch and polls for completion if needed
+func (client *Client) submitBatch(organizationId string, batchActions []ActionModel, mods ...func(*Req)) (Res, error) {
+	synchronous := len(batchActions) <= 20
 	body, _ := sjson.Set("", "confirmed", true)
 	body, _ = sjson.Set(body, "synchronous", synchronous)
-	for _, action := range actions {
+	for _, action := range batchActions {
 		actionBody, _ := sjson.Set("", "operation", action.Operation)
 		actionBody, _ = sjson.Set(actionBody, "resource", action.Resource)
 		actionBody, _ = sjson.SetRaw(actionBody, "body", action.Body)
 		body, _ = sjson.SetRaw(body, "actions.-1", actionBody)
 	}
-
 	url := fmt.Sprintf("/organizations/%s/actionBatches", organizationId)
 
 	client.batchOperationsChannel <- struct{}{}
-	defer func() {
-		<-client.batchOperationsChannel
-	}()
+	defer func() { <-client.batchOperationsChannel }()
 
 	req := client.NewReq("POST", url, strings.NewReader(body), mods...)
 	res, err := client.Do(req)
@@ -454,10 +504,8 @@ func (client *Client) Batch(organizationId string, actions []ActionModel, mods .
 	if completed {
 		return res, nil
 	}
-
+	// For async batch, poll for completion
 	id := res.Get("id").String()
-
-	// If the batch is not completed, we need to wait for it to complete
 	for {
 		req := client.NewReq("GET", fmt.Sprintf("/organizations/%s/actionBatches/%s", organizationId, id), nil)
 		res, err := client.Do(req)

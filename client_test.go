@@ -2,12 +2,14 @@ package meraki
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/tidwall/sjson"
 	"gopkg.in/h2non/gock.v1"
 )
 
@@ -201,12 +203,10 @@ func TestClientPut(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// TestClientBatch tests the Client::Batch method.
+// TestClientBatch tests the Client::Batch method (all scenarios)
 func TestClientBatch(t *testing.T) {
 	defer gock.Off()
 	client := testClient()
-
-	var err error
 
 	// Synchronous Success
 	gock.New(client.BaseUrl).
@@ -214,7 +214,7 @@ func TestClientBatch(t *testing.T) {
 		Reply(201).
 		BodyString(`{"id": "1", "status": {"completed": true, "failed": false, "errors": []}}`)
 	actions := []ActionModel{NewAction("update", "url", "{}")}
-	_, err = client.Batch("1", actions)
+	_, err := client.Batch("1", actions)
 	assert.NoError(t, err)
 
 	// Asynchronous Success
@@ -225,13 +225,10 @@ func TestClientBatch(t *testing.T) {
 	gock.New(client.BaseUrl).
 		Get("/organizations/1/actionBatches/1").
 		Reply(200).
-		BodyString(`{"id": "1", "status": {"completed": false, "failed": false, "errors": []}}`)
-	gock.New(client.BaseUrl).
-		Get("/organizations/1/actionBatches/1").
-		Reply(200).
 		BodyString(`{"id": "1", "status": {"completed": true, "failed": false, "errors": []}}`)
-	for range 20 {
-		actions = append(actions, NewAction("update", "url", "{}"))
+	actions = make([]ActionModel, 21)
+	for i := range actions {
+		actions[i] = NewAction("update", fmt.Sprintf("url%d", i), "{}")
 	}
 	_, err = client.Batch("1", actions)
 	assert.NoError(t, err)
@@ -244,4 +241,59 @@ func TestClientBatch(t *testing.T) {
 	actions = []ActionModel{NewAction("update", "url", "{}")}
 	_, err = client.Batch("1", actions)
 	assert.Error(t, err)
+
+	// Multi-batch Success (2 batches: 100 + 10)
+	actions = make([]ActionModel, 110)
+	for i := range actions {
+		actions[i] = NewAction("create", fmt.Sprintf("url%d", i), "{}")
+	}
+	createdResources1 := "[]"
+	for i := range 100 {
+		item, _ := sjson.Set("", "id", fmt.Sprintf("%d", i))
+		item, _ = sjson.Set(item, "url", fmt.Sprintf("url%d", i))
+		createdResources1, _ = sjson.SetRaw(createdResources1, "-1", item)
+	}
+	createdResources2 := "[]"
+	for i := 100; i < 110; i++ {
+		item, _ := sjson.Set("", "id", fmt.Sprintf("%d", i))
+		item, _ = sjson.Set(item, "url", fmt.Sprintf("url%d", i))
+		createdResources2, _ = sjson.SetRaw(createdResources2, "-1", item)
+	}
+	gock.New(client.BaseUrl).
+		Post("/organizations/1/actionBatches").
+		Reply(201).
+		BodyString(fmt.Sprintf(`{"id": "1", "status": {"completed": true, "failed": false, "errors": [], "createdResources": %s}}`, createdResources1))
+	gock.New(client.BaseUrl).
+		Post("/organizations/1/actionBatches").
+		Reply(200).
+		BodyString(fmt.Sprintf(`{"id": "2", "status": {"completed": true, "failed": false, "errors": [], "createdResources": %s}}`, createdResources2))
+	res, err := client.Batch("1", actions)
+	assert.NoError(t, err)
+	responses := res.Result.Get("responses").Array()
+	assert.Equal(t, 2, len(responses))
+	createdResources := res.Result.Get("status.createdResources").Array()
+	assert.Equal(t, 110, len(createdResources))
+
+	// Multi-batch Error (first ok, second error)
+	gock.New(client.BaseUrl).
+		Post("/organizations/1/actionBatches").
+		Reply(201).
+		BodyString(`{"id": "1", "status": {"completed": true, "failed": false, "errors": []}}`)
+	gock.New(client.BaseUrl).
+		Post("/organizations/1/actionBatches").
+		ReplyError(errors.New("fail"))
+	actions = make([]ActionModel, 110)
+	for i := range actions {
+		actions[i] = NewAction("update", fmt.Sprintf("url%d", i), "{}")
+	}
+	res, err = client.Batch("1", actions)
+	assert.Error(t, err)
+	responses = res.Result.Get("responses").Array()
+	assert.Equal(t, 2, len(responses))
+	// First batch should be successful, second should be error object
+	first := responses[0]
+	second := responses[1]
+	assert.False(t, first.Get("error").Exists(), "First batch should not be error")
+	assert.True(t, second.Get("error").Exists(), "Second batch should be error")
+	assert.Contains(t, second.Get("error").String(), "fail")
 }

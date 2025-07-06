@@ -49,7 +49,7 @@ type Client struct {
 	// UserAgent is the HTTP User-Agent string
 	UserAgent string
 	// Maximum number of requests per second
-	RequestPerSecond int
+	RequestsPerSecond int
 	// Maximum number of retries
 	MaxRetries int
 	// Minimum delay between two retries
@@ -114,8 +114,8 @@ func UserAgent(x string) func(*Client) {
 	}
 }
 
-// RequestPerSecond modifies the maximum number of requests per second. Default value is 10.
-func RequestPerSecond(x int) func(*Client) {
+// RequestsPerSecond modifies the maximum number of requests per second. Default value is 10.
+func RequestsPerSecond(x int) func(*Client) {
 	return func(client *Client) {
 		client.RateLimiterBucket = ratelimit.NewBucketWithQuantum(time.Second, int64(x), int64(x))
 	}

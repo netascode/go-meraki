@@ -1,6 +1,7 @@
 ## 0.2.0 (unreleased)
 
 - Add support for action batches (bulk) requests
+- Rename `RequestPerSecond()` to `RequestsPerSecond()`
 
 ## 0.1.2
 

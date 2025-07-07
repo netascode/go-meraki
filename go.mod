@@ -1,6 +1,6 @@
 module github.com/netascode/go-meraki
 
-go 1.22
+go 1.23.10
 
 require (
 	github.com/juju/ratelimit v1.0.2
